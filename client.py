@@ -65,15 +65,9 @@ def prepare_file_request(file_to_send):
     return (file_request).to_bytes((file_request.bit_length() + 7) // 8, byteorder='big') + file_to_send
          
     
-def decode_save_file(soc, filename):
-    try:
-        array = bytearray(soc.recv(8))
-    except Exception as e:
-        terminal_error("Error receiving header: {}".format(e), soc)
-       
+def check_validity(soc, array):
     if len(array) < 8:
         terminal_error("Could not receive full response header", soc)
-    
     
     magicNo = (array[0] << 8) ^ array[1] 
     if magicNo != 0x497e:
@@ -85,34 +79,43 @@ def decode_save_file(soc, filename):
     
     status_code = array[3]
     if status_code == 0:
-        terminal_error("Status code indicates that the file does not exist in server", soc)
+        terminal_error("Status code indicates that the file does not exist in server", soc)    
+    elif status_code != 1:
+        terminal_error("Invalid status code", soc)
     
-    if status_code == 1:
-        data_len = (array[4] << 24) ^ (array[5] << 16) ^ (array[6] << 8) ^ array[7]
-        header_bytes_received = len(array)
-        f = filename
-        try:
-            f = open(filename, 'w')
-        except Exception as e:
-            terminal_error("Error opening file for writing: {}".format(e), soc)        
+    
+def decode_save_file(soc, filename):
+    try:
+        array = bytearray(soc.recv(8))
+    except Exception as e:
+        terminal_error("Error receiving header: {}".format(e), soc)
+       
+    check_validity(soc, array)
+
+    data_len = (array[4] << 24) ^ (array[5] << 16) ^ (array[6] << 8) ^ array[7]
+    header_bytes_received = len(array)
+    try:
+        f = open(filename, 'w')
+    except Exception as e:
+        terminal_error("Error opening file for writing: {}".format(e), soc)        
             
-        try:
-            bytes_received = 0
+    try:
+        bytes_received = 0
+        array = soc.recv(4096)
+        while len(array) != 0:
+            for i in range(len(array)):
+                f.write(chr(array[i]))
+                bytes_received += 1
             array = soc.recv(4096)
-            while len(array) != 0:
-                for i in range(len(array)):
-                    f.write(chr(array[i]))
-                    bytes_received += 1
-                array = soc.recv(4096)
-      
-            f.close()
-            
-            if bytes_received != data_len:
-                terminal_error("Not all bytes received! {} Indicated, {} received".format(data_len, bytes_received), soc)
-            print("Recieved {} bytes including header and wrote {} bytes to file".format(header_bytes_received + bytes_received, bytes_received))        
-        except socket.error as message:
-            f.close()
-            terminal_error("Error whilst reading socket: {}".format(message), soc)    
+  
+        f.close()
+        
+        if bytes_received != data_len:
+            terminal_error("Not all bytes received! {} Indicated, {} received".format(data_len, bytes_received), soc)
+        print("Recieved {} bytes including header and wrote {} bytes to file".format(header_bytes_received + bytes_received, bytes_received))        
+    except socket.error as message:
+        f.close()
+        terminal_error("Error whilst reading socket: {}".format(message), soc)    
         
             
     soc.close()
